@@ -1,0 +1,260 @@
+---
+title: "NYPD Shooting Incident Data (Historic)"
+author: "Alana Hodge"
+date: "2023-05-01"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1. Description and importation of data.
+
+This document uses a dataset containing a list of every shooting incident that occured in New York City going back to 2006 through the end of the previous calendar year. 
+
+This data is manually extracted every quarter and reviewed by the Office of Management Analysis and Planning before being posted on the NYPD website.
+
+Each record in this dataset represents a shooting incident in New York City, and includes information about the event, location, time, and information related to suspect as well as victim demographics. 
+
+For this analysis, the *tidyverse* and *lubridate* packages will be utilized. 
+
+```{r libraryPackages, echo=TRUE, message = FALSE}
+library(tidyverse)
+library(lubridate)
+```
+
+We begin by importing the dataset as a CSV file.
+
+```{r importData, echo=TRUE, include=TRUE, message = FALSE}
+data_in = read_csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD")
+```
+
+## 2. Tidy and Transform your data
+
+Remove columns from dataset that are unnecessary for the purposes of this analysis; X_COORD_CD,Y_COORD_CD, PRECINCT, Latitude, Longitude, JURISDICTION_CODE, and Lon_Lat
+
+```{r removeUnusedColumns, echo = TRUE, INCLUDE=TRUE}
+data_in = data_in %>% select(
+  INCIDENT_KEY,
+  OCCUR_DATE,
+  OCCUR_TIME,
+  BORO,
+  STATISTICAL_MURDER_FLAG,
+  PERP_AGE_GROUP,
+  PERP_SEX,
+  PERP_RACE,
+  VIC_AGE_GROUP,
+  VIC_SEX,
+  VIC_RACE
+  )
+
+#Now we summarize the existing data to continue cleaning
+summary(data_in)
+```
+
+### Handling Missing Data
+Next, we want to see any missing data that may be within the dataset. Similar to the Pandas library approach, we can use the sum of the *is.na(x)* function.
+
+```{r showMissingValues}
+#Count of missing values by column:
+sapply(data_in, function(x) sum(is.na(x)))
+```
+We can see that the columns that contain missing values are PERP_AGE_GROUP, PERP_SEX and PERP_RACE. 
+
+For missing data,we don't want to simply remove the incident with missing data from the dataset. This is because the fact that there is information missing is information by itself; we can use missing data to draw further conclusions about the incident.
+In particular, noting that the missing data occurs in the PERP_AGE_GROUP, PERP_SEX and PERP_RACE columns, we can interpret this missing information as evidence that the perpetrator has yet be apprehended by authorities, and is thus unknown.
+
+We'll simply impute a missing tokens **UNKNOWN** to fill in this missing information for the sake of visualization and modeling.
+
+```{r imputeMissingValues}
+missing_token = "UNKNOWN"
+data_in = data_in %>%
+  replace_na(list(PERP_AGE_GROUP = missing_token, PERP_SEX = missing_token, PERP_RACE = missing_token))
+
+#Sanity check to ensure that all missing values have been imputed correctly:
+sapply(data_in, function(x) sum(is.na(x)))
+```
+We can see that all missing values have been imputed as intended. 
+In the final cleaning step, we want to ensure that we change the appropriate variables to factors, and convert any column data types to the intended format.
+
+### Remove outliers and edge cases
+We remove outliers from the dataset before continuing to visualization and modeling. This means identifying records of incidents where a variable was noticably inputted incorrectly. 
+Failure to remove these outliers may skew the final results of this analysis.
+
+*Example: Values in PREP_AGE_GROUP should not exceed an age of 100 or so, based on common sense and intuition.*
+
+For this analysis, we'll focus on cleaning the categorical columns PERP_AGE_GROUP and VIC_AGE_GROUP.
+
+First, let's view what values can occur in these columns.
+```{r viewUniqueAges}
+#PERP_AGE_GROUP Unique Values
+unique(data_in[["PERP_AGE_GROUP"]])
+
+#VIC_AGE_GROUP Unique Values
+unique(data_in[["VIC_AGE_GROUP"]])
+
+```
+We can see that in both age group columns, we have age-range values that do not seem to be accurate values: "1020","940", "224" and "1022".
+
+We'll filter out these records for cleaner data. 
+
+```{r filterAgeOutliers}
+data_in = data_in %>% filter(PERP_AGE_GROUP != "940",
+                             PERP_AGE_GROUP != "1020",
+                             PERP_AGE_GROUP != "224")
+
+data_in = data_in %>% filter(VIC_AGE_GROUP != "1022")
+
+#Return the unique values of these columns
+#as a sanity check to ensure outlying data has been filtered out:
+
+#PERP_AGE_GROUP Unique Values
+unique(data_in[["PERP_AGE_GROUP"]])
+
+#VIC_AGE_GROUP Unique Values
+unique(data_in[["VIC_AGE_GROUP"]])
+
+```
+
+
+
+We'll leave the *"(null)"* data values in PERP_AGE_GROUP alone, as the presence of these may indicate that there was no perpetrator as a result of a self-inflicted shooting.
+
+```{r nullValueAttribution}
+numerator = nrow(data_in[data_in$STATISTICAL_MURDER_FLAG == FALSE & 
+ data_in$PERP_AGE_GROUP  == "(null)", ])
+
+denomenator = nrow(data_in[data_in$PERP_AGE_GROUP == "(null)", ])
+
+numerator / denomenator
+
+```
+We can support the above hypothesis by noticing that 85% of records where "PERP_AGE_GROUP" was set to "null" are statistically unlikely to be murders, indicating that there was no perpetrator. Thus, we'll leave this value alone in cleaning.
+
+## 3. Add Visualizations and Analysis
+
+### Question 1:
+How likely are women to be killed by men compared to women in a homicide shooting?
+
+```{r visualization1}
+q1_data = data_in %>% filter(STATISTICAL_MURDER_FLAG == TRUE & VIC_SEX == 'F')
+
+nFemale_Perps = nrow(q1_data[q1_data$PERP_SEX == "F", ])
+nMale_Perps = nrow(q1_data[q1_data$PERP_SEX == "M", ])
+nOther_Perps = nrow(q1_data[q1_data$PERP_SEX == "U", ])
+total_Perps = nFemale_Perps + nMale_Perps + nOther_Perps
+
+male_percent = paste(round(nMale_Perps / total_Perps*100), "%")
+female_percent = paste(round(nFemale_Perps / total_Perps*100), "%")
+other_percent = paste(round(nOther_Perps / total_Perps*100), "%")
+
+x <- c(nMale_Perps, nFemale_Perps, nOther_Perps)
+labels <- c(male_percent, female_percent, other_percent)
+
+pie(x, labels, main ="Prop. of Female Victims Murdered by Male vs. Female Perpetrators",
+    col=rainbow(length(x)))
+legend("topright",
+       c("Male", "Female", "Unidentified"), cex = 0.8,
+       fill = rainbow(length(x)))
+
+```
+From above, we can see that a nearly all female victims in NYC that are involved in statistically determined murders have male perpetrators (~96%).
+This implies that women who are murdered in NYC are almost almost murdered by a man, making it very rare that the perpetrator of a shooting incident involving a female victim is also a female.
+
+### Question 2:
+In which NYC Borroughs are female victims often murdered as a result of shooting incidents? 
+
+```{r visualization 2}
+
+q2_data = q1_data
+q2_plot <- ggplot(q2_data, aes(x = BORO)) +
+  geom_bar() +
+  labs(title = "NYC Borroughs by Number of Shooting Incidents with Female Victims",
+      x = "Neighbourhood Name",
+      y = "Number of Shooting Incidents")
+q2_plot
+
+```
+
+From the visualization above, we can see that out of all incidents with female victims, the majority of these incidents occur in __Brooklyn__,with just over 200 incidents, followed closely by The __Bronx__ Borrough, at just under 150. 
+
+From this analysis, we can determine that a woman is most likely to be murdered in a shooting incident in __Brooklyn__ if she is invovled in a fatal shooting incident. 
+
+Moreover, we can gain an understanding of which borroughs are considered "safest" in terms of fatal shooting incidents involving woman:
+
+In order of "Safest" to "Least Safest":
+
+1. Staten Island
+2. Manhattan
+3. Queens
+4. Bronx
+5. Brooklyn
+
+### Modeling
+
+We'll use a logistic regression model to see if we can predict which borough an incident occurs in based on the demographics of the victim and perpetrator. 
+
+Question: Can we predict which borough a shooting incident occurs in based on the demographic information of the victim and the perpetrator?
+
+We'll *factor* the data that we need first, then call the generalized linear model (glm).
+
+```{r Modeling Step}
+
+#Factors:
+
+data_in$BORO = as.factor(data_in$BORO)
+
+data_in$PERP_AGE_GROUP = as.factor(data_in$PERP_AGE_GROUP)
+data_in$PERP_RACE = as.factor(data_in$PERP_RACE)
+data_in$PERP_SEX = as.factor(data_in$PERP_SEX)
+
+data_in$VIC_AGE_GROUP = as.factor(data_in$VIC_AGE_GROUP)
+data_in$VIC_RACE = as.factor(data_in$VIC_RACE)
+data_in$VIC_SEX = as.factor(data_in$VIC_SEX)
+
+#Call for glm model
+glm.fit <- glm(BORO ~ PERP_RACE + PERP_SEX + PERP_AGE_GROUP + VIC_AGE_GROUP + VIC_RACE +
+                 VIC_SEX, data = data_in, family=binomial)
+
+summary(glm.fit)
+```
+
+
+
+## 4. Add Bias Identification
+
+Data Bias:
+
+* Variables described here as relating to a victim or perpetrator's race may have bias. Definitions of racial-identity change overtime, is unclear whether or not the individual actually identifies as the race they have been identified as in this dataset, or whether or not they are actually a combination of multiple races, and how mixed-race individuals are being identified in this dataset. 
+
+* The data does not contain any variable for understanding the context of the incident. For example, it's unclear whether or not the perpetrator acted out of self-defense. Context towards the full investigation of these shooting incidents could drastically change how this data and the resulting analysis is perceived.
+
+Personal Bias:
+
+In a topic like this that relies heavily on the demographics of the people involved, discrimination and implicit bias can seep into the perception of the data.
+I am aware that I am not immune to subconcious biases towards people due to their demographics, but in order to mitigate this, I avoided over-analyzing incidents relating to the demographics of those involved, and instead focused on just ensuring that the data was cleaned and handled with care, without diving into specifics or reading particular incident reports.
+
+
+## 5. External Resources Used for Reference:
+
+1. https://stackoverflow.com/questions/13613913/how-do-i-convert-certain-columns-of-a-data-frame-to-become-factors
+
+2. https://ismayc.github.io/rbasics-book/5-rmdanal.html#data-structures
+
+3. https://www.educative.io/answers/how-to-access-the-columns-of-a-data-frame-in-r
+
+4. https://humansofdata.atlan.com/2018/03/when-delete-outliers-dataset/
+
+5. https://dplyr.tidyverse.org/reference/filter.html
+
+6. https://www.statology.org/r-count-values-in-column-with-condition/
+
+7. http://statseducation.com/Introduction-to-R/modules/tidy%20data/filter/
+
+8. https://www.tutorialspoint.com/r/r_pie_charts.htm
+
+### Session info (as output from R) for Reproducibility
+```{r SessionInfo}
+sessionInfo()
+```
