@@ -1,0 +1,136 @@
+---
+title: "Covid19 Time Series Data Analysis"
+author: "Alana Hodge"
+date: "2023-05-02"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1 Import Data
+
+```{r libraryPackages, echo=TRUE, message = FALSE}
+library(tidyverse)
+library(lubridate)
+```
+
+Importing John Hopkins COVID-19 time series Data:
+
+* Global COVID-19 Cases
+* Global COVID-19 Deaths
+* US-specific COVID-19 Cases
+* US-specific COVID-19 Deaths
+
+
+```{r ImportCovid19Data}
+global_cases = read_csv("https://github.com/CSSEGISandData/COVID-19/raw/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv")
+global_deaths = read_csv("https://github.com/CSSEGISandData/COVID-19/raw/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_global.csv")
+
+us_cases = read_csv("https://github.com/CSSEGISandData/COVID-19/raw/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_US.csv")
+us_deaths = read_csv("https://github.com/CSSEGISandData/COVID-19/raw/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_US.csv")
+
+```
+
+## 2. Tidy And Transform The Data
+
+### Remove unnecessary columns
+
+We most likely don't need the Latitude and Longitude Coordinates in any of the datasets.
+We can probably get rid of "iso2", "iso3", "code2" and "FIPS" columns in the US datasets as well.
+
+```{r removeUnnecessaryColumns}
+global_cases = global_cases <- subset (global_cases, select = -Long)
+global_cases = global_cases <- subset (global_cases, select = -Lat)
+
+global_deaths = global_deaths <- subset (global_deaths, select = -Long)
+global_deaths = global_deaths <- subset (global_deaths, select = -Lat)
+
+us_cases = us_cases <- subset (us_cases, select = -iso2)
+us_cases = us_cases <- subset (us_cases, select = -iso3)
+us_cases = us_cases <- subset (us_cases, select = -code3)
+us_cases = us_cases <- subset (us_cases, select = -FIPS)
+us_cases = us_cases <- subset (us_cases, select = -Lat)
+us_cases = us_cases <- subset (us_cases, select = -Long_)
+
+
+us_deaths = us_deaths <- subset (us_deaths, select = -iso2)
+us_deaths = us_deaths <- subset (us_deaths, select = -iso3)
+us_deaths = us_deaths <- subset (us_deaths, select = -code3)
+us_deaths = us_deaths <- subset (us_deaths, select = -FIPS)
+us_deaths = us_deaths <- subset (us_deaths, select = -Lat)
+us_deaths = us_deaths <- subset (us_deaths, select = -Long_)
+```
+
+### Handle Missing Data
+Next, we handle missing data, by removing any entries that have missing values
+in the remaining columns.
+```{r handleMissingData}
+us_cases <- na.omit(us_cases)
+us_deaths <- na.omit(us_deaths)
+global_deaths <- na.omit(global_deaths)
+global_cases <- na.omit(global_cases)
+```
+
+
+## 3. Visualizations and Analysis
+
+Question: How many people died from COVID-19 during the pandemic years in
+North American countries?
+
+```{r NorthAmericanDeathsVisualization, include=TRUE}
+
+q1_data = global_deaths %>% filter(`Country/Region` == "Canada" |
+                                     `Country/Region` == "US" |
+                                     `Country/Region` == "Mexico")
+
+q1_df1 = q1_data
+
+q1_df1 <- subset (q1_data, select = -`Province/State`)
+q1_df1 <- subset (q1_df1, select = -`Country/Region`)
+q1_df1$Total_Deaths = rowSums(q1_df1)
+
+q1_data$Total_Deaths = q1_df1$Total_Deaths
+
+q1_plot <- ggplot(q1_data, aes(x = `Country/Region`, y = Total_Deaths)) +
+  geom_bar(stat='identity') +
+  labs(title = "Number of COVID-19 deaths from 2019-2022 in North America",
+       x = "Country",
+       y = "Number of deaths")
+q1_plot
+```
+
+
+## 4. Modeling
+
+
+
+## 5. Bias Implications
+
+Regarding biases identified in the data set:
+
+### Reporting Bias
+Not all countries have tested and measured for Covid-19 related cases in deaths in the same way. Specifically for countries with rural populations and/or poor
+infrastructure, measuring the actual impact of Covid-19 among the population is
+not equitably done across all nations. 
+
+Moreover, it's possible that not all cases of Covid-19 are reported at all.
+Especially towards the end of the pandemic, where many people treated their 
+symptoms in isolation, it's inaccurate to assume that all cases of Covid-19 in
+any given country/region were reported. 
+
+### Personal Bias
+
+The effect of Covid-19 from my own perspective is drastically different from
+others. With debates on proper treatment, vaccintaion and policies around
+wearing masks, it's reasonable to assume that not everyone reading this report
+or utilizing this data has the same perspective on Covid-19 and the pandemic.
+This by itself is a form of personal bias that everyone can have towards this
+topic, including myself.
+
+## Session info for reproducibility
+```{r sessionInfo}
+sessionInfo()
+```
+
